@@ -7,44 +7,50 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-#knitr::opts_knit$set(root.dir = "~/Box #Sync/Documents/MyOngoing/Crime&Greenspace/AnalysisForRevision/Chicago/")
 ```
 
 
 
-```{r}
+```{r libraries}
 library(tidycensus)
 library(tidyverse)
 library(tigris)
 library(rgdal)
 library(purrr)
 library(sf)
-census_api_key("4d745721877aa8f3beca6dd8e074fce5bc74a6ee")
+#census_api_key()
 
 ```
 
+Variables needded from ACS 2019
+*Returns both Estimates and margin of error. Will indicate the total estimate for groups with parameter in get_acs()
 
-Variables needded from ACS 2019 (Kaylah's Version)
-*Returns both Estimates and margin of error, formatting to come for percent estimates. Will indicate the total estimate for groups with parameter in get_acs()
-
+Race:
 Total population: B02001_001
-One race-White: B02001_002
-One race-Black: B02001_003
-One race-American Indian or Alaska Native: B02001_004
-One race-Asian:B02001_005
-One race-Native Hawaiian: B02001_006
-One race-Other: B02001_007
-Two or more races:B02001_008
-Two races including Some other race: B02001_009
-Two races excluding Some other race, and three or more races:B02001_010
-Hispanic or Latino: B03001_003
-Not Hispanic or Latino: B03001_002
-Median Household income: B19013_001
-Gini Index: 19083_001
-Less than High School Education: B15003_002 to _016
-Bachelors or higher: B15003_021 to _025
-Total population for age measures: B01001_001
-Age range: (have to add male and female populations together)
+
+  One race-White: B02001_002
+  One race-Black: B02001_003
+  One race-American Indian or Alaska Native: B02001_004
+  One race-Asian:B02001_005
+  One race-Native Hawaiian: B02001_006
+  One race-Other: B02001_007
+  Two or more races:B02001_008
+  Two races including Some other race: B02001_009
+  Two races excluding Some other race, and three or more races:B02001_010
+  Hispanic or Latino: B03001_003
+  Not Hispanic or Latino: B03001_002
+
+Socioeconomic status:
+  Median Household income: B19013_001
+  Gini Index: 19083_001
+
+Education:
+  Less than High School Education: B15003_002 to _016
+  Bachelors or higher: B15003_021 to _025
+
+Age:
+  Total population for age measures: B01001_001
+  (male and female populations together)
   Under 5 years: B01001_003 & B01001_027
   5 to 9 years: B01001_004 & B01001_028
   10 to 14 years: B01001_005 & B01001_029
@@ -68,23 +74,23 @@ Age range: (have to add male and female populations together)
   75 to 79 years: B01001_023 & B01001_047
   80 to 84 years: B01001_024 & B01001_048
   85 years and over: B01001_025 & B01001_049
-  * Aggregate all of these age variables to make 7 age ranges: under 18, 18-24, 25-34, 35-44, 45-54, 55-64, 65-74, over 75
+
+Adjusted age ranges: 
+  5 to 17 year
+  18 to 34 years
+  35 to 64 years
+  65 to 74 years
+  75 years and over
+  
 Gender: 
   Total population: B01001_001
   Female: B01001_026
   Male: B01001_002
-  
-  
-Adjust age ranges to this? Also included in ACS measures find via B18106_025 (self care difficulty, possible factor to include. Tangent: should inclue geographical mobility in the past year measure?)
-18 to 34 years
-35 to 64 years
-5 to 17 year
-65 to 74 years
-75 years and over
+
+** Also included in ACS measures find via B18106_025 (self care difficulty, possible factor to include. Should inclue geographical mobility in the past year measure?)
 
 
-
-```{r}
+```{r get county area}
 # grabbing FIPS state and county codes for get_acs state and county inputs
 
 cbsa <- read.csv("/Users/kaylah/OneDrive/School Documents/depression_data/list1_Sep_2018.csv")
@@ -100,7 +106,8 @@ my_counties <- fips_codes %>%
 
 ```
 
-```{r}
+
+```{r census vars}
 # Variables of Interest
 
 race_vars <- c(White = "B03002_003",
@@ -194,10 +201,28 @@ gender_vars <- c(female = 'B01001_026',
 gender_tot <- 'B01001_001'
 ```
 
+Building custom shapefile (used for database organization and spatial modeling)
+```{r get full shapefile}
+multi_state_ct_geo_list <- map2(
+  my_counties$state_code, my_counties$county_code,
+    ~ get_acs(
+        geography = "tract",
+        variables = c(pop_tot = race_summ_var),
+        state = .x,
+        county = .y,
+        year = 2019,
+        geometry = TRUE,
+        output = "wide"  # get data in wide format for easier mapping
+        )
+    )
 
-```{r}
-#Kaylah
-# have to use acs 2019 because relevant variables for 2020 census have not been released yet
+multi_state_ct_geo <- reduce(multi_state_ct_geo_list, rbind)
+
+st_write(multi_state_ct_geo, "custom_chicago_cbsa_tracts.shp", append=FALSE)
+```
+
+```{r TRACT collect vars}
+# acs 2019
 
 v19 <- load_variables(2019, "acs5", cache = TRUE)
 View(v19)
@@ -260,7 +285,7 @@ chi_cbsa_edu <- map2_dfr(
             output = "wide")
   )
 
-# Only have less than HS and bachelor or higher, can add complete highschool and some college vars later 
+# Only have less than HS and bachelor or higher, can add complete highschool and some college vars 
 chi_cbsa_edu_sum <- chi_cbsa_edu %>%
   rowwise(GEOID) %>%
   mutate(PENoCollege = sum(c(LessHS1E,LessHS2E, LessHS3E, 
@@ -280,54 +305,8 @@ chi_cbsa_age <- map2_dfr(
             year = 2019, 
             output = "wide")
   )
-# Merging Female and Male age ranges together
-#chi_cbsa_age_sum <- chi_cbsa_age %>%
-#  rowwise(GEOID) %>%
-#  mutate(PEUnder5 = sum(c(mUnder5E, 
-#                         fUnder5E))/summary_est,
-#         PE5t9 = sum(c(m5t9E,
-#                      f5t9E))/summary_est,
-#         PE10t14 = sum(c(m10t14E,
-#                        f10t14E))/summary_est,
-#         PE15t17 = sum(c(m15t17E,
-#                        f15t17E))/summary_est,
-#         PE18t19 = sum(c(m18t19E,
-#                        f18t19E))/summary_est,
-#         PE20 = sum(c(m20E,
-#                     f20E))/summary_est,
-#         PE21 = sum(c(m21E,
-#                     f21E))/summary_est,
-#         PE22t24 = sum(c(m22t24E,
-#                        f22t24E))/summary_est,
-#         PE25t29 = sum(c(m25t29E,
-#                        f25t29E))/summary_est,
-#         PE30t34 = sum(c(m30t34E,
-#                        f30t34E))/summary_est,
-#         PE35t39 = sum(c(m35t39E,
-#                        f35t39E))/summary_est,
-#         PE40t44 = sum(c(m40t44E,
-#                        f40t44E))/summary_est,
-#         PE50t54 = sum(c(m50t54E,
-#                        f50t54E))/summary_est,
-#         PE55t59 = sum(c(m55t59E,
-#                        f55t59E))/summary_est,
-#         PE60t61 = sum(c(m60t61E,
-#                        f60t61E))/summary_est,
-#         PE62t64 = sum(c(m62t64E,
-#                        f62t64E))/summary_est,
-#         PE65t66 = sum(c(m65t66E,
-#                        f65t66E))/summary_est,
-#         PE67t69 = sum(c(m67t69E,
-#                        f67t69E))/summary_est,
-#         PE70t74 = sum(c(m70t74E,
-#                        f70t74E))/summary_est,
-#         PE75t79 = sum(c(m75t79E,
-#                        f75t79E))/summary_est,
-#         PE80t84 = sum(c(m80t84E,
-#                        f80t84E))/summary_est,
-#         PE85over = sum(c(m85overE,
-#                         f85overE))/summary_est)
 
+# Aggregate gender and multiple age ranges together
 chi_cbsa_age_sum <- chi_cbsa_age %>%
   rowwise(GEOID) %>%
   mutate(PEUnder18 = sum(c(mUnder5E,
@@ -350,7 +329,7 @@ chi_cbsa_age_sum <- chi_cbsa_age %>%
                         f25t29E,
                         m30t34E,
                         f30t34E))/summary_est,
-         PE35t34 = sum(c(m35t39E,
+         PE35t44 = sum(c(m35t39E,
                           f35t39E,
                           m40t44E,
                           f40t44E))/summary_est,
@@ -395,7 +374,9 @@ chi_cbsa_gender_sum <- chi_cbsa_gender %>%
 chi_cbsa_gender_sum <- chi_cbsa_gender_sum %>% rename(GenderSum = summary_est, GenderMOE = summary_moe)
 
 
+```
 
+```{r TRACT format datatable}
 # Merging and Cleaning Dataset
 Chi_acs2019 <- merge(chi_cbsa_race_sum, chi_cbsa_edu_sum, by="GEOID")
 Chi_acs2019 <- merge(Chi_acs2019, chi_cbsa_pubasst_sum, by='GEOID')
@@ -405,53 +386,23 @@ Chi_acs2019 <- merge(Chi_acs2019, chi_cbsa_gender_sum, by='GEOID')
 
 
 
-# Chi_acs2019 <- Chi_acs2019 %>% select(-23,-68, -77, -82, -200)
 Chi_acs2019 <- Chi_acs2019 %>% select(-23,-68, -77, -82, -185)
 Chi_acs2019 <- Chi_acs2019 %>% rename(Tract = 2)
 
 write_csv(Chi_acs2019, 'Chicago_subset_acs2019.csv')
 
-# Chi_acs2019_clean <- Chi_acs2019 %>% 
-#  select(GEOID, Tract, PEWhite, PEBlack, PENative, PEAsian, PEHIPI, PEHispanic, GiniE, MedincE, PEpubasst,
-#         PEnopubasst,PENoCollege, PECollege, PEUnder5, PE5t9, PE10t14, PE15t17, PE18t19, PE20, PE21, PE22t24, #PE25t29, PE30t34, PE35t39, PE40t44, PE45t49, PE50t54, PE55t59, PE60t61, PE62t64, PE65t66, PE67t69, PE70t74, #PE75t79, PE80t84, PE85over, PEFemale, PEMale)
-
 Chi_acs2019_clean <- Chi_acs2019 %>% 
   select(GEOID, Tract, PEWhite, PEBlack, PENative, PEAsian, PEHIPI, PEHispanic, GiniE, MedincE, PEpubasst,
-         PEnopubasst,PENoCollege, PECollege, PEUnder18, PE18t24, PE25t34, PE35t34, PE45t54, PE55t64, PE65t74,
+         PEnopubasst,PENoCollege, PECollege, PEUnder18, PE18t24, PE25t34, PE35t44, PE45t54, PE55t64, PE65t74,
          PE75over, PEFemale, PEMale)
 
 write_csv(Chi_acs2019_clean,"Chicago_subset_acs2019_clean.csv")
 ```
 
-Building custom shapefile
-```{r}
-multi_state_ct_geo_list <- map2(
-  my_counties$state_code, my_counties$county_code,
-    ~ get_acs(
-        geography = "tract",
-        variables = c(pop_tot = race_summ_var),
-        state = .x,
-        county = .y,
-        year = 2019,
-        geometry = TRUE,
-        output = "wide"  # get data in wide format for easier mapping
-        )
-    )
-
-multi_state_ct_geo <- reduce(multi_state_ct_geo_list, rbind)
-
-st_write(multi_state_ct_geo, "custom_chicago_cbsa_tracts.shp", append=FALSE)
-```
-
 
 Modifying chunk to use zipcode for prelim analysis, not tract 
-```{r}
-#Kaylah
-# have to use acs 2019 because relevant variables for 2020 census have not been released yet
-
-v19 <- load_variables(2019, "acs5", cache = TRUE)
-View(v19)
-
+```{r ZIP collect vars}
+# acs 2019 
 State_lst <- c('IN', 'IL', 'WI')
 
 # Race Variables
@@ -541,7 +492,7 @@ chi_cbsa_age_sum <- chi_cbsa_age %>%
                         f25t29E,
                         m30t34E,
                         f30t34E))/summary_est,
-         PE35t34 = sum(c(m35t39E,
+         PE35t44 = sum(c(m35t39E,
                           f35t39E,
                           m40t44E,
                           f40t44E))/summary_est,
@@ -581,8 +532,9 @@ chi_cbsa_gender_sum <- chi_cbsa_gender %>%
   mutate(PEFemale = femaleE/summary_est,
          PEMale = maleE/summary_est)
 chi_cbsa_gender_sum <- chi_cbsa_gender_sum %>% rename(GenderSum = summary_est, GenderMOE = summary_moe)
+```
 
-
+```{r ZIP format datatable}
 
 # Merging and Cleaning Dataset
 Chi_acs2019 <- merge(chi_cbsa_race_sum, chi_cbsa_edu_sum, by="GEOID")
@@ -592,7 +544,6 @@ Chi_acs2019 <- merge(Chi_acs2019, chi_cbsa_age_sum, by='GEOID')
 Chi_acs2019 <- merge(Chi_acs2019, chi_cbsa_gender_sum, by='GEOID')
 
 
-# Chi_acs2019 <- Chi_acs2019 %>% select(-23,-68, -77, -82, -200)
 Chi_acs2019 <- Chi_acs2019 %>% select(-23,-68, -77, -82, -185)
 Chi_acs2019 <- Chi_acs2019 %>% rename(Tract = 2)
 
@@ -600,120 +551,8 @@ write_csv(Chi_acs2019, 'Chicago_zcta_subset_acs2019.csv')
 
 Chi_acs2019_clean <- Chi_acs2019 %>% 
   select(GEOID, Tract, PEWhite, PEBlack, PENative, PEAsian, PEHIPI, PEHispanic, GiniE, MedincE, PEpubasst,
-         PEnopubasst,PENoCollege, PECollege, PEUnder18, PE18t24, PE25t34, PE35t34, PE45t54, PE55t64, PE65t74,
+         PEnopubasst,PENoCollege, PECollege, PEUnder18, PE18t24, PE25t34, PE35t44, PE45t54, PE55t64, PE65t74,
          PE75over, PEFemale, PEMale)
 
 write_csv(Chi_acs2019_clean,"Chicago_zcta_subset_acs2019_clean.csv")
 ```
-
-
-Merging ACS variables and crime, and reducing from Cook to Chicago census tracts
-```{r}
-Chicago_tracts <- read_csv("../../Chicago_DataSetupFiles/CensusTracts_Chicago.csv")
-Chicago_tracts <- Chicago_tracts %>% select(geoid10) %>% mutate(geoid10=as.factor(geoid10)) %>% rename(GEOID=geoid10)
-Chicago_2017variables <- merge(Chicago_tracts, cleanvars, all.x = TRUE, by="GEOID")
-
-chi_crime2017 <- read.csv("ChicagoCrimeByCensusTract_2017.csv")
-Chicago_2017variables <- merge(Chicago_2017variables, chi_crime2017, all.x = TRUE)
-
-write_csv(Chicago_2017variables, "Chicago2017_ACS&Crime.csv")
-```
-
-Adding working population
-From https://lehd.ces.census.gov/data/
-LODES Survey - WAC characteristics
-C000 is total number of jobs, starts at Census Block level
-Need to group by census tract (first 11 digit)
-```{r}
-il_wac <- read_csv("il_wac_S000_JT00_2017.csv")
-cook_wac <- il_wac %>% filter(grepl("^17031", w_geocode)) %>% dplyr::select(w_geocode, C000)
-cook_wac$w_geocode <- as.character(cook_wac$w_geocode)
-cook_wac <- cook_wac %>% mutate(tract = substr(w_geocode, 1, 11))
-cook_wac$tract <- as.factor(cook_wac$tract)
-cook_wac_ct <- cook_wac %>% group_by(tract) %>% dplyr::summarize(WorkingPop = sum(C000))
-
-#Adding to all other variables
-Chicago_2017variables <- merge(Chicago_2017variables, cook_wac_ct, all.x=TRUE, by.x="GEOID", by.y="tract")
-
-#If a census tract is missing it means they had no jobs there in this year, so changing to 0
-Chicago_2017variables <- Chicago_2017variables %>% 
-  replace_na(list(WorkingPop=0))
-
-write_csv(Chicago_2017variables, "Chicago2017_ACS&Crime.csv")
-```
-
-Getting Land Cover from original data
-```{r}
-originaldata <- read_csv("../../TractsChicago_withAllData.csv")
-orig_neededvars <- originaldata %>% dplyr::select(GEOID, CommunityArea, PercTreeZScore, PercGrassZScore, knnZScore, knn, PercTrees, PercGrass)
-
-Chicago_2017variables <- merge(orig_neededvars, Chicago_2017variables, all.x = TRUE)
-
-summary(Chicago_2017variables)
-colnames(Chicago_2017variables)
-
-write_csv(Chicago_2017variables,"Chicago2017_ACS&Crime&Land.csv")
-```
-
-Adding Jamie's new Park Visits data
-```{r}
-newpark_mus <- read.csv("chicago_psych_100m.csv")
-newpark_mus <- newpark_mus %>% rename(GEOID=geoid) %>% mutate(GEOID=as.factor(GEOID))
-newpark_mus <- newpark_mus %>% rename(NewPark = npark, NewMuseum = nmuse)
-
-newpark_dist <- read.csv("chicago_park_dist_100m.csv")
-newpark_dist <- newpark_dist %>% rename(GEOID=geoid) %>% mutate(GEOID=as.factor(GEOID))
-
-Chicago_2017variables <- merge(Chicago_2017variables, newpark_mus, all.x = TRUE, by= "GEOID")
-Chicago_2017variables <- merge(Chicago_2017variables, newpark_dist, all.x = TRUE, by= "GEOID")
-
-write_csv(Chicago_2017variables, "Chicago2017_ACS&Crime&Land&Cell.csv")
-```
-
-Z-scoring and Log Transformations
-```{r}
-Chicago_2017variables$GEOID <- as.factor(Chicago_2017variables$GEOID)
-Chicago_2017variables$CommunityArea <- as.factor(Chicago_2017variables$CommunityArea)
-
-Chicago_2017variables <- Chicago_2017variables %>% 
-  mutate(PercBlackAloneZScore = (PercBlackAlone - mean(PercBlackAlone))/sd(PercBlackAlone),
-         PercBlackOtherZScore = (PercBlackAloneWOther - mean(PercBlackAloneWOther))/sd(PercBlackAloneWOther),
-         PercHispanicZScore = (PercHispanic - mean(PercHispanic))/sd(PercHispanic),
-         PercCollegeZScore = (PercCollege - mean(PercCollege))/sd(PercCollege),
-         PercLessThanHSZScore = (PercLessThanHS - mean(PercLessThanHS))/sd(PercLessThanHS),
-         PercPovertyZScore = (PercPoverty - mean(PercPoverty))/sd(PercPoverty),
-         PercUnemployedZScore = (PercUnemployed - mean(PercUnemployed))/sd(PercUnemployed),
-         PercResStabZScore = (PercResStability - mean(PercResStability))/sd(PercResStability),
-         PercForeignBornZScore = (PercForeignBorn - mean(PercForeignBorn))/sd(PercForeignBorn),
-         PercCrowdedZScore = (PercCrowded - mean(PercCrowded))/sd(PercCrowded),
-         LogMedHouseInc = log(MedHouseInc),
-         LogIncomeZScore = (LogMedHouseInc - mean(LogMedHouseInc))/sd(LogMedHouseInc),
-         LogNonViolent = log(NonViolent),
-         LogViolent = log(Violent),
-         TotalCrime = NonViolent + Violent,
-         LogWorkingPop = log1p(WorkingPop),
-         LogJobsZScore = (LogWorkingPop - mean(LogWorkingPop))/sd(LogWorkingPop),
-         LogPopulation = log(population),
-         LogPopZScore = (LogPopulation - mean(LogPopulation))/sd(LogPopulation),
-         NewParkZScore = (NewPark - mean(NewPark))/sd(NewPark),
-         NewMuseumZScore = (NewMuseum - mean(NewMuseum))/sd(NewMuseum),
-         parkdistZScore = (tp_dist - mean(tp_dist))/sd(tp_dist))
-
-#Checking for any missing data
-sum(is.na.data.frame(Chicago_2017variables))
-
-VarsForModel <- Chicago_2017variables %>% 
-  dplyr::select(GEOID, CommunityArea, LogNonViolent, LogViolent, PercTreeZScore, PercGrassZScore, knnZScore, parkdistZScore, NewParkZScore, NewMuseumZScore, PercBlackOtherZScore, PercHispanicZScore, PercCollegeZScore, PercLessThanHSZScore, PercPovertyZScore, PercUnemployedZScore, PercResStabZScore, PercForeignBornZScore, PercCrowdedZScore, LogIncomeZScore, LogJobsZScore, LogPopZScore)
-
-
-write_csv(Chicago_2017variables, "Chicago2017_AllData.csv")
-
-#Read this back in to start analysis. Will need 'all variables' version if interpretation of beta
-write_csv(VarsForModel, "Chicago2017_VarsForModel.csv")
-```
-
-Land Use data
-```{r}
-landuse <- readOGR("../Parcel_Chicago/.")
-```
-
