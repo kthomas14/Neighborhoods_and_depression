@@ -14,9 +14,9 @@ Urban neighborhood characteristics are vastly diverse and can help to explain so
 ---
 
 ## Directory
-1. [R]() collection and organization of all USA Census variables included in study
-2. [Geoda]() contains necessary files for GIS analysis
-3. [Python]() machine learning pipeline and final analysis
+1. [R](https://github.com/kthomas14/Neighborhoods_and_depression/tree/main/R) collection and organization of all USA Census variables included in study
+2. [Geoda](https://github.com/kthomas14/Neighborhoods_and_depression/tree/main/Geoda) contains necessary files for GIS analysis
+3. [Python](https://github.com/kthomas14/Neighborhoods_and_depression/tree/main/Python) machine learning pipeline and final analysis
 
 ---
 
